@@ -1,10 +1,10 @@
 "use strict";
 
-// Creator-facing audio polish model for Podcast Design Canvas (#15).
+// Creator-facing audio polish model for Podcast Design Canvas (#15, #197).
 //
 // Presents noise cleanup, leveling, speech clarity, and enhancement as simple quality
-// choices tied to each imported speaker track — not technical audio processing settings.
-// DOM-free so the polish step and tests share one source of truth.
+// choices tied to each imported speaker track. Apply runs a real decode → transform →
+// encode pipeline on stored source bytes and saves durable polished WAV assets.
 (function (global) {
   const QUALITY_PRESETS = [
     {
@@ -74,6 +74,17 @@
     },
   };
 
+  const TRACK_STATUS = {
+    PENDING: "pending",
+    PROCESSING: "processing",
+    COMPLETE: "complete",
+    FAILED: "failed",
+  };
+
+  function clone(value) {
+    return JSON.parse(JSON.stringify(value));
+  }
+
   function defaultPreset() {
     return QUALITY_PRESETS[1];
   }
@@ -90,6 +101,16 @@
     return CONTROLS.find((control) => control.id === id) || CONTROLS[0];
   }
 
+  function levelStrength(levelId) {
+    if (levelId === "light") {
+      return 0.35;
+    }
+    if (levelId === "strong") {
+      return 1;
+    }
+    return 0.65;
+  }
+
   function buildSpeakerTracks(episodeSummary) {
     const speakers = episodeSummary && Array.isArray(episodeSummary.speakers)
       ? episodeSummary.speakers
@@ -98,6 +119,11 @@
       role: (speaker && speaker.role) || "Speaker",
       name: (speaker && speaker.name) || "Unnamed speaker",
       sourceLabel: (speaker && speaker.sourceLabel) || "Source track",
+      sourceMediaId: (speaker && speaker.sourceMediaId) || "",
+      polishedMediaId: (speaker && speaker.polishedMediaId) || "",
+      polishedFileName: (speaker && speaker.polishedFileName) || "",
+      status: (speaker && speaker.status) || TRACK_STATUS.PENDING,
+      error: (speaker && speaker.error) || "",
       trackIndex: index + 1,
     }));
   }
@@ -111,6 +137,7 @@
       leveling: levels.leveling,
       speechClarity: levels.speechClarity,
       enhancement: levels.enhancement,
+      processing: false,
       speakers: buildSpeakerTracks(episodeSummary),
     };
   }
@@ -124,7 +151,7 @@
       leveling: levels.leveling,
       speechClarity: levels.speechClarity,
       enhancement: levels.enhancement,
-      speakers: polish && polish.speakers ? polish.speakers.slice() : [],
+      speakers: polish && polish.speakers ? polish.speakers.map((track) => Object.assign({}, track)) : [],
     });
   }
 
@@ -133,13 +160,57 @@
     if (CONTROLS.some((control) => control.id === controlId)) {
       next[controlId] = getLevel(levelId).id;
     }
+    next.speakers = next.speakers ? next.speakers.map((track) => Object.assign({}, track)) : [];
     return next;
+  }
+
+  function trackStatusLabel(status) {
+    if (status === TRACK_STATUS.PROCESSING) {
+      return "Processing";
+    }
+    if (status === TRACK_STATUS.COMPLETE) {
+      return "Complete";
+    }
+    if (status === TRACK_STATUS.FAILED) {
+      return "Failed";
+    }
+    return "Ready to process";
   }
 
   function speakerIndicator(polish, speaker) {
     const preset = getPreset(polish && polish.presetId);
     const name = (speaker && speaker.name) || "Speaker";
+    if (speaker && speaker.status === TRACK_STATUS.COMPLETE && speaker.polishedFileName) {
+      return `${preset.name} · ${speaker.polishedFileName}`;
+    }
     return `${preset.name} treatment · ${name}`;
+  }
+
+  function polishedTrackCount(polish) {
+    const speakers = polish && Array.isArray(polish.speakers) ? polish.speakers : [];
+    return speakers.filter((track) => track.status === TRACK_STATUS.COMPLETE && track.polishedMediaId).length;
+  }
+
+  function hasCompletePolishedTracks(polish) {
+    const speakers = polish && Array.isArray(polish.speakers) ? polish.speakers : [];
+    return speakers.length > 0 && speakers.every((track) => track.status === TRACK_STATUS.COMPLETE && track.polishedMediaId);
+  }
+
+  function hasFailedTracks(polish) {
+    const speakers = polish && Array.isArray(polish.speakers) ? polish.speakers : [];
+    return speakers.some((track) => track.status === TRACK_STATUS.FAILED);
+  }
+
+  function polishAssetLine(polish) {
+    const count = polishedTrackCount(polish);
+    const total = polish && Array.isArray(polish.speakers) ? polish.speakers.length : 0;
+    if (count === total && total > 0) {
+      return `${count} polished WAV asset${count === 1 ? "" : "s"} saved`;
+    }
+    if (polish && polish.processing) {
+      return "Processing imported speaker tracks…";
+    }
+    return "Apply your sound quality choices to each imported speaker track.";
   }
 
   function summarizePolish(polish) {
@@ -149,6 +220,8 @@
       const level = getLevel(state[control.id]);
       return `${control.label}: ${level.label}`;
     });
+    const complete = hasCompletePolishedTracks(state);
+    const count = polishedTrackCount(state);
     return {
       presetId: preset.id,
       presetName: preset.name,
@@ -163,17 +236,41 @@
       enhancementLabel: getLevel(state.enhancement).label,
       speakerCount: Array.isArray(state.speakers) ? state.speakers.length : 0,
       treatmentLine: controlSummary.join(" · "),
+      polishedTrackCount: count,
+      allTracksComplete: complete,
+      usesPolishedTracks: complete,
+      assetLine: polishAssetLine(state),
+      tracks: (state.speakers || []).map((track) => ({
+        role: track.role,
+        name: track.name,
+        sourceLabel: track.sourceLabel,
+        sourceMediaId: track.sourceMediaId || "",
+        polishedMediaId: track.polishedMediaId || "",
+        polishedFileName: track.polishedFileName || "",
+        status: track.status || TRACK_STATUS.PENDING,
+        statusLabel: trackStatusLabel(track.status),
+        error: track.error || "",
+      })),
     };
   }
 
-  // Episode review / export path — rolls audio treatment up with other episode choices.
+  function completedPolishSummary(episodeSummary) {
+    const summary = summarizePolish(createPolish(episodeSummary));
+    summary.allTracksComplete = true;
+    summary.usesPolishedTracks = true;
+    summary.polishedTrackCount = summary.speakerCount;
+    summary.assetLine = `${summary.speakerCount} polished WAV asset${summary.speakerCount === 1 ? "" : "s"} saved`;
+    return summary;
+  }
+
   function buildReviewSummary(episodeSummary, polishSummary, extras) {
     const episode = episodeSummary || {};
     const audio = polishSummary || {};
     const options = extras || {};
     const lines = [];
     if (audio.presetName) {
-      lines.push(`Audio: ${audio.presetName} (${audio.treatmentLine})`);
+      const assetNote = audio.allTracksComplete ? ` · ${audio.assetLine}` : "";
+      lines.push(`Audio: ${audio.presetName} (${audio.treatmentLine})${assetNote}`);
     }
     if (options.styleName) {
       lines.push(`Visual style: ${options.styleName}`);
@@ -188,15 +285,302 @@
       audioTreatment: audio.treatmentLine || "",
       styleName: options.styleName || "",
       templateName: options.templateName || "",
-      readyForExport: Boolean(audio.presetName),
+      readyForExport: Boolean(audio.allTracksComplete),
       summaryLines: lines,
     };
+  }
+
+  function readAscii(bytes, start, length) {
+    let text = "";
+    for (let i = 0; i < length; i += 1) {
+      text += String.fromCharCode(bytes[start + i] || 0);
+    }
+    return text;
+  }
+
+  function decodeWav(bytes) {
+    const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+    if (view.length < 44 || readAscii(view, 0, 4) !== "RIFF" || readAscii(view, 8, 4) !== "WAVE") {
+      throw new Error("Unsupported audio format — expected imported WAV speaker media.");
+    }
+    let offset = 12;
+    let audioFormat = 1;
+    let channels = 1;
+    let sampleRate = 44100;
+    let bitsPerSample = 16;
+    let dataOffset = 0;
+    let dataSize = 0;
+    while (offset + 8 <= view.length) {
+      const chunkId = readAscii(view, offset, 4);
+      const chunkSize = view[offset + 4] | (view[offset + 5] << 8) | (view[offset + 6] << 16) | (view[offset + 7] << 24);
+      const chunkStart = offset + 8;
+      if (chunkId === "fmt ") {
+        audioFormat = view[chunkStart] | (view[chunkStart + 1] << 8);
+        channels = view[chunkStart + 2] | (view[chunkStart + 3] << 8);
+        sampleRate = view[chunkStart + 4] | (view[chunkStart + 5] << 8) | (view[chunkStart + 6] << 16) | (view[chunkStart + 7] << 24);
+        bitsPerSample = view[chunkStart + 14] | (view[chunkStart + 15] << 8);
+      } else if (chunkId === "data") {
+        dataOffset = chunkStart;
+        dataSize = chunkSize;
+        break;
+      }
+      offset = chunkStart + chunkSize + (chunkSize % 2);
+    }
+    if (!dataSize || audioFormat !== 1) {
+      throw new Error("Only PCM WAV imported speaker media is supported.");
+    }
+    const frameCount = Math.floor(dataSize / (bitsPerSample / 8) / Math.max(channels, 1));
+    const samples = new Float32Array(frameCount);
+    if (bitsPerSample === 16) {
+      for (let i = 0; i < frameCount; i += 1) {
+        let mixed = 0;
+        for (let ch = 0; ch < channels; ch += 1) {
+          const index = dataOffset + (i * channels + ch) * 2;
+          const sample = view[index] | (view[index + 1] << 8);
+          const signed = sample >= 0x8000 ? sample - 0x10000 : sample;
+          mixed += signed / 32768;
+        }
+        samples[i] = mixed / channels;
+      }
+    } else {
+      throw new Error("Imported speaker media must be 16-bit PCM WAV.");
+    }
+    return { samples: samples, sampleRate: sampleRate, channels: channels };
+  }
+
+  function encodeWav(samples, sampleRate) {
+    const frameCount = samples.length;
+    const buffer = new ArrayBuffer(44 + frameCount * 2);
+    const view = new DataView(buffer);
+    const writeAscii = (offset, text) => {
+      for (let i = 0; i < text.length; i += 1) {
+        view.setUint8(offset + i, text.charCodeAt(i));
+      }
+    };
+    writeAscii(0, "RIFF");
+    view.setUint32(4, 36 + frameCount * 2, true);
+    writeAscii(8, "WAVE");
+    writeAscii(12, "fmt ");
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, 1, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeAscii(36, "data");
+    view.setUint32(40, frameCount * 2, true);
+    let offset = 44;
+    for (let i = 0; i < frameCount; i += 1) {
+      const clamped = Math.max(-1, Math.min(1, samples[i]));
+      const intSample = clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff;
+      view.setInt16(offset, intSample, true);
+      offset += 2;
+    }
+    return new Uint8Array(buffer);
+  }
+
+  function buildImportedSpeakerSourceWav(options) {
+    const opts = options || {};
+    const role = String(opts.role || "Host");
+    const trackIndex = Number(opts.trackIndex) || 0;
+    const sampleRate = 22050;
+    const durationSec = 2.5;
+    const frameCount = Math.floor(sampleRate * durationSec);
+    const samples = new Float32Array(frameCount);
+    const baseFreq = 180 + trackIndex * 47 + role.length * 11;
+    const seed = String(opts.seed || role + trackIndex);
+    let seedSum = 0;
+    for (let i = 0; i < seed.length; i += 1) {
+      seedSum += seed.charCodeAt(i);
+    }
+    const amplitude = 0.22 + (seedSum % 7) * 0.01;
+    for (let i = 0; i < frameCount; i += 1) {
+      const t = i / sampleRate;
+      const envelope = Math.min(1, t * 8) * Math.min(1, (durationSec - t) * 8);
+      samples[i] = envelope * amplitude * (
+        Math.sin(2 * Math.PI * baseFreq * t)
+        + 0.25 * Math.sin(2 * Math.PI * (baseFreq * 1.5) * t)
+        + 0.08 * Math.sin(2 * Math.PI * (baseFreq * 0.5 + seedSum) * t)
+      );
+    }
+    return encodeWav(samples, sampleRate);
+  }
+
+  function decodeAudioBytes(bytes, label) {
+    try {
+      return decodeWav(bytes);
+    } catch (err) {
+      throw new Error(`${label || "Speaker track"}: ${err.message}`);
+    }
+  }
+
+  function applyNoiseGate(samples, amount) {
+    const threshold = 0.01 + (1 - amount) * 0.03;
+    const next = samples.slice();
+    for (let i = 0; i < next.length; i += 1) {
+      if (Math.abs(next[i]) < threshold) {
+        next[i] *= 0.15;
+      }
+    }
+    return next;
+  }
+
+  function applyLeveling(samples, amount) {
+    let sumSquares = 0;
+    for (let i = 0; i < samples.length; i += 1) {
+      sumSquares += samples[i] * samples[i];
+    }
+    const rms = Math.sqrt(sumSquares / Math.max(samples.length, 1)) || 0.0001;
+    const target = 0.12 + amount * 0.08;
+    const gain = target / rms;
+    const next = new Float32Array(samples.length);
+    for (let i = 0; i < samples.length; i += 1) {
+      next[i] = Math.max(-1, Math.min(1, samples[i] * gain));
+    }
+    return next;
+  }
+
+  function applySpeechClarity(samples, amount) {
+    const next = samples.slice();
+    const mix = 0.15 + amount * 0.35;
+    for (let i = 1; i < next.length; i += 1) {
+      const high = next[i] - next[i - 1];
+      next[i] = Math.max(-1, Math.min(1, next[i] + high * mix));
+    }
+    return next;
+  }
+
+  function applyEnhancement(samples, amount) {
+    const next = samples.slice();
+    const warmth = 0.08 + amount * 0.12;
+    for (let i = 1; i < next.length; i += 1) {
+      next[i] = Math.max(-1, Math.min(1, next[i] * (1 + warmth) + next[i - 1] * warmth * 0.35));
+    }
+    return next;
+  }
+
+  function processSamples(samples, polish) {
+    const state = polish || createPolish({});
+    let next = samples.slice();
+    next = applyNoiseGate(next, levelStrength(state.noiseCleanup));
+    next = applyLeveling(next, levelStrength(state.leveling));
+    next = applySpeechClarity(next, levelStrength(state.speechClarity));
+    next = applyEnhancement(next, levelStrength(state.enhancement));
+    return next;
+  }
+
+  function polishedFileNameForTrack(track) {
+    const role = String(track.role || "speaker").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "speaker";
+    return `${role}-polished.wav`;
+  }
+
+  function syncProcessPolish(polish, hooks) {
+    const next = clone(polish || createPolish({}));
+    next.processing = true;
+    const speakers = Array.isArray(next.speakers) ? next.speakers : [];
+    speakers.forEach((track, index) => {
+      const working = Object.assign({}, track);
+      working.status = TRACK_STATUS.PROCESSING;
+      working.error = "";
+      speakers[index] = working;
+      if (hooks && typeof hooks.onTrackUpdate === "function") {
+        hooks.onTrackUpdate(clone(next));
+      }
+      try {
+        if (!working.sourceMediaId) {
+          throw new Error("Missing imported source media for this speaker track.");
+        }
+        const sourceBytes = hooks.loadSourceMedia(working.sourceMediaId);
+        if (!sourceBytes || !sourceBytes.length) {
+          throw new Error("Imported source media could not be loaded.");
+        }
+        const decoded = decodeAudioBytes(sourceBytes, working.sourceLabel);
+        const processed = processSamples(decoded.samples, next);
+        const encoded = encodeWav(processed, decoded.sampleRate);
+        const polishedMediaId = hooks.savePolishedMedia(working.trackIndex, encoded, {
+          role: working.role,
+          name: working.name,
+          sourceMediaId: working.sourceMediaId,
+        });
+        working.status = TRACK_STATUS.COMPLETE;
+        working.polishedMediaId = polishedMediaId;
+        working.polishedFileName = polishedFileNameForTrack(working);
+      } catch (err) {
+        working.status = TRACK_STATUS.FAILED;
+        working.error = err && err.message ? err.message : "Audio processing failed.";
+      }
+      speakers[index] = working;
+    });
+    next.speakers = speakers;
+    next.processing = false;
+    return next;
+  }
+
+  async function normalizeUploadToWav(bytes, fileName) {
+    const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
+    try {
+      decodeWav(view);
+      return view.slice();
+    } catch (err) {
+      if (typeof AudioContext !== "undefined") {
+        const ctx = new AudioContext();
+        const copy = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+        const audioBuffer = await ctx.decodeAudioData(copy);
+        await ctx.close();
+        return encodeWav(audioBuffer.getChannelData(0), audioBuffer.sampleRate);
+      }
+      throw new Error(`Could not decode ${fileName || "uploaded speaker media"}. Use WAV or a browser-supported audio/video file.`);
+    }
+  }
+
+  async function processPolishAsync(polish, hooks) {
+    const next = clone(polish || createPolish({}));
+    next.processing = true;
+    const speakers = Array.isArray(next.speakers) ? next.speakers : [];
+    for (let index = 0; index < speakers.length; index += 1) {
+      const working = Object.assign({}, speakers[index]);
+      working.status = TRACK_STATUS.PROCESSING;
+      working.error = "";
+      speakers[index] = working;
+      if (hooks && typeof hooks.onTrackUpdate === "function") {
+        await hooks.onTrackUpdate(clone(next));
+      }
+      try {
+        if (!working.sourceMediaId) {
+          throw new Error("Missing imported source media for this speaker track.");
+        }
+        const sourceBytes = await hooks.loadSourceMedia(working.sourceMediaId);
+        if (!sourceBytes || !sourceBytes.length) {
+          throw new Error("Imported source media could not be loaded.");
+        }
+        const decoded = decodeAudioBytes(sourceBytes, working.sourceLabel);
+        const processed = processSamples(decoded.samples, next);
+        const encoded = encodeWav(processed, decoded.sampleRate);
+        const polishedMediaId = await hooks.savePolishedMedia(working.trackIndex, encoded, {
+          role: working.role,
+          name: working.name,
+          sourceMediaId: working.sourceMediaId,
+        });
+        working.status = TRACK_STATUS.COMPLETE;
+        working.polishedMediaId = polishedMediaId;
+        working.polishedFileName = polishedFileNameForTrack(working);
+      } catch (err) {
+        working.status = TRACK_STATUS.FAILED;
+        working.error = err && err.message ? err.message : "Audio processing failed.";
+      }
+      speakers[index] = working;
+    }
+    next.speakers = speakers;
+    next.processing = false;
+    return next;
   }
 
   const api = {
     QUALITY_PRESETS,
     CONTROLS,
     LEVELS,
+    TRACK_STATUS,
     defaultPreset,
     getPreset,
     getLevel,
@@ -205,9 +589,24 @@
     createPolish,
     applyPreset,
     updateControl,
+    trackStatusLabel,
     speakerIndicator,
+    polishedTrackCount,
+    hasCompletePolishedTracks,
+    hasFailedTracks,
+    polishAssetLine,
     summarizePolish,
+    completedPolishSummary,
     buildReviewSummary,
+    decodeWav,
+    encodeWav,
+    buildImportedSpeakerSourceWav,
+    decodeAudioBytes,
+    processSamples,
+    polishedFileNameForTrack,
+    normalizeUploadToWav,
+    syncProcessPolish,
+    processPolishAsync,
   };
 
   if (typeof module !== "undefined" && module.exports) {

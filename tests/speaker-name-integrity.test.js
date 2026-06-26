@@ -167,7 +167,7 @@ test("ACCEPTANCE: Sam Rivera stays exact from setup through templates and export
     templateName: savedTemplate.name,
   });
   const exportSummary = exportApi.buildFinalSummary(episode, {
-    audioPolish: audio.summarizePolish(audio.createPolish(episode)),
+    audioPolish: audio.completedPolishSummary(episode),
     appliedStyle: appliedStyle,
     templateName: savedTemplate.name,
     momentsSummary: momentsSummary,

@@ -118,7 +118,7 @@
   function validateReadiness(context) {
     const ctx = context || {};
     const missing = [];
-    if (!ctx.audioPolish || !ctx.audioPolish.presetName) {
+    if (!ctx.audioPolish || !ctx.audioPolish.presetName || !ctx.audioPolish.allTracksComplete) {
       missing.push("audio");
     }
     if (!ctx.appliedStyle || !ctx.appliedStyle.presetName) {
@@ -155,7 +155,8 @@
     lines.push(`${episode.speakerCount || 0} speaker${episode.speakerCount === 1 ? "" : "s"} · ${episode.sourceModeLabel || "sources"}`);
 
     if (ctx.audioPolish && ctx.audioPolish.presetName) {
-      lines.push(`Audio: ${ctx.audioPolish.presetName} (${ctx.audioPolish.treatmentLine || "treatment applied"})`);
+      const assetNote = ctx.audioPolish.allTracksComplete ? ` · ${ctx.audioPolish.assetLine}` : "";
+      lines.push(`Audio: ${ctx.audioPolish.presetName} (${ctx.audioPolish.treatmentLine || "treatment applied"})${assetNote}`);
     }
     if (ctx.appliedStyle && ctx.appliedStyle.presetName) {
       lines.push(

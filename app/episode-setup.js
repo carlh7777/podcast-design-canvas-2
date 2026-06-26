@@ -64,6 +64,7 @@
       role: role || "",
       fileName: "",
       fileSize: 0,
+      sourceMediaId: "",
       trackLabel: "",
       social: emptySocial(),
     };
@@ -263,6 +264,8 @@
         role: trim(speaker.role),
         name: trim(speaker.name),
         sourceLabel: sourceLabel(mode, speaker),
+        sourceMediaId: trim(speaker.sourceMediaId),
+        fileName: trim(speaker.fileName),
         social,
       };
     });

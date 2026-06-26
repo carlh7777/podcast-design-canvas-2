@@ -49,7 +49,8 @@ async function polishAudioFromWorkspace(page) {
   await page.locator(".audio-step").waitFor();
   await page.locator(".audio-preset-card").first().click();
   await page.getByRole("button", { name: "Apply audio & continue →" }).click();
-  await page.locator(".guided-workspace").waitFor({ state: "visible" });
+  await page.locator(".audio-track-status-complete").first().waitFor({ timeout: 15000 });
+  await page.locator(".guided-workspace").waitFor({ state: "visible", timeout: 15000 });
 }
 
 async function openExportFromWorkspace(page) {

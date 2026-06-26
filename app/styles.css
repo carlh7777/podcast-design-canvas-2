@@ -1983,6 +1983,81 @@ button.ghost:hover,
   padding: 4px 10px;
 }
 
+.audio-polish-status-card {
+  margin-bottom: 16px;
+}
+
+.audio-polish-asset-line {
+  margin: 0;
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.audio-polish-status-note {
+  margin: 8px 0 0;
+}
+
+.audio-track-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.audio-track-status {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+
+.audio-track-status-pending {
+  color: #475467;
+  background: #f2f4f7;
+}
+
+.audio-track-status-processing {
+  color: #175cd3;
+  background: #eff8ff;
+}
+
+.audio-track-status-complete {
+  color: #027a48;
+  background: #ecfdf3;
+}
+
+.audio-track-status-failed {
+  color: #b42318;
+  background: #fef3f2;
+}
+
+.audio-track-polished-file {
+  margin: 6px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #027a48;
+}
+
+.audio-track-error {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: #b42318;
+}
+
+.audio-track-complete {
+  border-color: #abefc6;
+}
+
+.audio-track-processing {
+  border-color: #b2ddff;
+}
+
+.audio-track-failed {
+  border-color: #fecdca;
+}
+
 .audio-summary-preset {
   font-weight: 700;
   font-size: 16px;
