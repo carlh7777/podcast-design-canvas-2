@@ -122,7 +122,8 @@ test("ACCEPTANCE: UI wires Apply to async processing with per-track status and a
   assert.ok(ui.includes("applyAudioPolishAndStay"));
   assert.ok(ui.includes("openAudioPolishStep"));
   assert.ok(ui.includes("audio-apply-btn"));
-  assert.ok(ui.includes("audio-track-status-complete"));
+  assert.ok(ui.includes("audio-track-status-"));
+  assert.ok(ui.includes("TRACK_STATUS.COMPLETE"));
   assert.ok(ui.includes("audio-polish-asset-line"));
   assert.ok(ui.includes("ingestEpisodeSourceMedia"));
   assert.ok(styles.includes(".audio-track-status-complete"));
